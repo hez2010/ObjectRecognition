@@ -17,35 +17,39 @@ namespace ObjectRecognition
         static void Main(string[] args)
         {
             //predict:
+
+            Train();
+
             Console.WriteLine("Load svm model");
             var svm = SVM.Load("SVM_RESULT.xml");
             var cnt = 0;
             Console.WriteLine("Start prediction process");
             var starttime = DateTime.Now;
-            foreach (var i in Directory.GetFiles("Videos", "*.mp4"))
+            //foreach (var i in Directory.GetFiles("Videos", "*.mp4"))
+            //{
+            //    cnt++;
+            //    var start = DateTime.Now;
+            //    var res = PredictV(svm, i);
+            //    Console.WriteLine($"{Path.GetFileName(i)} - Time cost: {(DateTime.Now - start).TotalMilliseconds} ms");
+            //    Console.WriteLine("Results:");
+            //    for (var j = 1; j < 10; j++)
+            //    {
+            //        Console.WriteLine($"{j} - confidence: {res.Count(k => k == j) * 100f / res.Count} %");
+            //    }
+            //}
+
+
+            foreach (var i in Directory.GetFiles("JPEGImages", "*- Copy.jpg"))
             {
                 cnt++;
                 var start = DateTime.Now;
-                var res = PredictV(svm, i);
-                Console.WriteLine($"{Path.GetFileName(i)} - Time cost: {(DateTime.Now - start).TotalMilliseconds} ms");
-                Console.WriteLine("Results:");
-                for(var j = 1; j < 10; j++)
-                {
-                    Console.WriteLine($"{j} - confidence: {res.Count(k => k == j) * 100f / res.Count} %");
-                }
-            }
-            foreach (var i in Directory.GetFiles("JPEGImages", "*.jpg"))
-            {
-                cnt++;
-                var start = DateTime.Now;
-                Console.WriteLine($"{Path.GetFileName(i)} - Result: {Predict(svm, i)}, time cost: {(DateTime.Now - start).TotalMilliseconds} ms");
+                Console.WriteLine($"{Path.GetFileName(i)} - Result: {Predict(svm, Cv2.ImRead(i, ImreadModes.GrayScale))}, time cost: {(DateTime.Now - start).TotalMilliseconds} ms");
             }
             Console.WriteLine($"Average speed: {cnt / (DateTime.Now - starttime).TotalSeconds} per second");
 
 
 
             //train svm model:
-            //Train();
 
 
 
@@ -74,9 +78,11 @@ namespace ObjectRecognition
                 Mat frame = new Mat();
                 while (current < stop && videoCapture.Read(frame))
                 {
+                    Cv2.CvtColor(frame, frame, ColorConversionCodes.RGB2GRAY);
                     res.Add(Predict(svm, frame));
                     current++;
                 }
+                frame.Release();
                 videoCapture.Release();
             }
             return res;
@@ -118,21 +124,26 @@ namespace ObjectRecognition
             }
 
             //creat matrix
-            Mat data = Mat.Zeros(nImgCnt, 144, MatType.CV_32FC1);
+            var hog = new HOGDescriptor(new Size(64, 64), new Size(16, 16), new Size(8, 8), new Size(8, 8));
+            Mat data = Mat.Zeros(nImgCnt, hog.GetDescriptorSize(), MatType.CV_32FC1);
             Mat res = Mat.Zeros(nImgCnt, 1, MatType.CV_32SC1);
             for (var z = 0; z < nImgCnt; z++)
             {
                 //load img
-                Mat src = Cv2.ImRead(imgPath[z]);
+                Mat src = Cv2.ImRead(imgPath[z], ImreadModes.GrayScale);
                 Console.WriteLine($"Processing: {Path.GetFileNameWithoutExtension(imgPath[z])}");
                 Cv2.Resize(src, src, new Size(64, 64));
-                var hog = new HOGDescriptor(new Size(64, 64), new Size(16, 16), new Size(16, 16), new Size(16, 16), 9);
-                var descriptors = hog.Compute(src, new Size(8, 8), new Size(0, 0));
+                src = src.Threshold(200, 255, ThresholdTypes.Binary);
+                MoveToCenter(src);
+                //Cv2.ImShow("img", src);
+                //Cv2.WaitKey();
+                var descriptors = hog.Compute(src, new Size(1, 1), new Size(0, 0));
                 for (var i = 0; i < descriptors.Length; i++)
                 {
                     data.Set(z, i, descriptors[i]);
                 }
                 res.Set(z, 0, imgCatg[z]);
+                src.Release();
             }
 
             Console.WriteLine("Start training");
@@ -143,11 +154,11 @@ namespace ObjectRecognition
             svm.Type = SVM.Types.CSvc;
             svm.KernelType = SVM.KernelTypes.Rbf;
             svm.Degree = 10;
-            svm.Gamma = 8;
+            svm.Gamma = 0.09;
             svm.Coef0 = 1;
             svm.C = 10;
             svm.Nu = 0.5;
-            svm.P = 0.1;
+            svm.P = 1;
 
             //training
             svm.Train(data, SampleTypes.RowSample, res);
@@ -156,35 +167,51 @@ namespace ObjectRecognition
             svm.Save("SVM_RESULT.xml");
         }
 
-        static float Predict(SVM svm, Mat src)
+        static void MoveToCenter(Mat img)
         {
-            Mat data = Mat.Zeros(1, 144, MatType.CV_32FC1);
-            Cv2.Resize(src, src, new Size(64, 64));
-
-            var hog = new HOGDescriptor(new Size(64, 64), new Size(16, 16), new Size(16, 16), new Size(16, 16), 9);
-            var descriptors = hog.Compute(src, new Size(8, 8), new Size(0, 0));
-            for (var i = 0; i < descriptors.Length; i++)
+            int left = img.Rows - 1, right = 0, top = img.Rows - 1, buttom = 0;
+            for (var i = 0; i < img.Rows; i++)
             {
-                data.Set(0, i, descriptors[i]);
-            }
+                for (var j = 0; j < img.Cols; j++)
+                {
+                    if (img.At<byte>(i, j) != 0)
+                    {
+                        left = Math.Min(left, j);
+                        right = Math.Max(right, j);
 
-            return svm.Predict(data);
+                        top = Math.Min(top, i);
+                        buttom = Math.Max(buttom, i);
+                    }
+                }
+            }
+            int dx = (right + left - img.Rows) / 2, dy = (buttom + top - img.Cols) / 2;
+            Mat dst = Mat.Zeros(img.Rows, img.Cols, img.Type());
+
+            for (var i = 0; i < img.Rows; i++)
+            {
+                for (var j = 0; j < img.Cols; j++)
+                {
+                    if (i + dx < img.Rows && i + dx >= 0 && j + dy < img.Cols && j + dy >= 0)
+                        dst.Set(i + dx, j + dy, img.At<byte>(i, j));
+                }
+            }
+            dst.CopyTo(img);
         }
 
-        static float Predict(SVM svm, string fileName)
+        static float Predict(SVM svm, Mat src)
         {
-            var src = Cv2.ImRead(fileName);
-
-            Mat data = Mat.Zeros(1, 144, MatType.CV_32FC1);
+            var hog = new HOGDescriptor(new Size(64, 64), new Size(16, 16), new Size(8, 8), new Size(8, 8));
+            Mat data = Mat.Zeros(1, hog.GetDescriptorSize(), MatType.CV_32FC1);
             Cv2.Resize(src, src, new Size(64, 64));
-
-            var hog = new HOGDescriptor(new Size(64, 64), new Size(16, 16), new Size(16, 16), new Size(16, 16), 9);
-            var descriptors = hog.Compute(src, new Size(8, 8), new Size(0, 0));
+            src = src.Threshold(200, 255, ThresholdTypes.Binary);
+            MoveToCenter(src);
+            //Cv2.ImShow("img", src);
+            //Cv2.WaitKey();
+            var descriptors = hog.Compute(src, new Size(1, 1), new Size(0, 0));
             for (var i = 0; i < descriptors.Length; i++)
             {
                 data.Set(0, i, descriptors[i]);
             }
-
             return svm.Predict(data);
         }
     }
