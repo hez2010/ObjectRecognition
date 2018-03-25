@@ -16,15 +16,20 @@ namespace ObjectRecognition
     {
         static void Main(string[] args)
         {
-            //predict:
-
+            //training
             Train();
 
+
+            //predict:
             Console.WriteLine("Load svm model");
+            
             var svm = SVM.Load("SVM_RESULT.xml");
             var cnt = 0;
             Console.WriteLine("Start prediction process");
             var starttime = DateTime.Now;
+
+            //predict videos:
+
             //foreach (var i in Directory.GetFiles("Videos", "*.mp4"))
             //{
             //    cnt++;
@@ -38,8 +43,8 @@ namespace ObjectRecognition
             //    }
             //}
 
-
-            foreach (var i in Directory.GetFiles("JPEGImages", "*- Copy.jpg"))
+            //predict imgs
+            foreach (var i in Directory.GetFiles("JPEGImages", "*- Copy.jpg")) //test cases
             {
                 cnt++;
                 var start = DateTime.Now;
@@ -47,13 +52,9 @@ namespace ObjectRecognition
             }
             Console.WriteLine($"Average speed: {cnt / (DateTime.Now - starttime).TotalSeconds} per second");
 
-
-
-            //train svm model:
-
-
-
+            
             //extract video to images:
+
             //foreach (var i in Directory.GetFiles("Videos"))
             //{
             //    Console.WriteLine($"Processing: {Path.GetFileName(i)}");
@@ -65,6 +66,12 @@ namespace ObjectRecognition
             return;
         }
 
+        /// <summary>
+        /// predict video
+        /// </summary>
+        /// <param name="svm"></param>
+        /// <param name="fileName"></param>
+        /// <returns></returns>
         private static List<float> PredictV(SVM svm, string fileName)
         {
             var res = new List<float>();
@@ -88,6 +95,10 @@ namespace ObjectRecognition
             return res;
         }
 
+        /// <summary>
+        /// extract video to images
+        /// </summary>
+        /// <param name="fileName"></param>
         static void ExportToJpg(string fileName)
         {
             using (VideoCapture videoCapture = new VideoCapture(fileName))
@@ -109,6 +120,9 @@ namespace ObjectRecognition
 
         }
 
+        /// <summary>
+        /// train model
+        /// </summary>
         static void Train()
         {
             //load catalog
@@ -123,8 +137,9 @@ namespace ObjectRecognition
                 imgCatg.Add(Convert.ToInt32(temp[0]));
             }
 
-            //creat matrix
+            //create HOG
             var hog = new HOGDescriptor(new Size(64, 64), new Size(16, 16), new Size(8, 8), new Size(8, 8));
+
             Mat data = Mat.Zeros(nImgCnt, hog.GetDescriptorSize(), MatType.CV_32FC1);
             Mat res = Mat.Zeros(nImgCnt, 1, MatType.CV_32SC1);
             for (var z = 0; z < nImgCnt; z++)
@@ -132,11 +147,17 @@ namespace ObjectRecognition
                 //load img
                 Mat src = Cv2.ImRead(imgPath[z], ImreadModes.GrayScale);
                 Console.WriteLine($"Processing: {Path.GetFileNameWithoutExtension(imgPath[z])}");
+
+                //resize to 64*64
                 Cv2.Resize(src, src, new Size(64, 64));
+
+                //threshold
                 src = src.Threshold(200, 255, ThresholdTypes.Binary);
+
+                //center image
                 MoveToCenter(src);
-                //Cv2.ImShow("img", src);
-                //Cv2.WaitKey();
+
+                //computer descriptors
                 var descriptors = hog.Compute(src, new Size(1, 1), new Size(0, 0));
                 for (var i = 0; i < descriptors.Length; i++)
                 {
@@ -167,6 +188,10 @@ namespace ObjectRecognition
             svm.Save("SVM_RESULT.xml");
         }
 
+        /// <summary>
+        /// center image
+        /// </summary>
+        /// <param name="img"></param>
         static void MoveToCenter(Mat img)
         {
             int left = img.Rows - 1, right = 0, top = img.Rows - 1, buttom = 0;
@@ -198,15 +223,23 @@ namespace ObjectRecognition
             dst.CopyTo(img);
         }
 
+        /// <summary>
+        /// predict
+        /// </summary>
+        /// <param name="svm"></param>
+        /// <param name="src"></param>
+        /// <returns></returns>
         static float Predict(SVM svm, Mat src)
         {
             var hog = new HOGDescriptor(new Size(64, 64), new Size(16, 16), new Size(8, 8), new Size(8, 8));
             Mat data = Mat.Zeros(1, hog.GetDescriptorSize(), MatType.CV_32FC1);
+
             Cv2.Resize(src, src, new Size(64, 64));
+
             src = src.Threshold(200, 255, ThresholdTypes.Binary);
+
             MoveToCenter(src);
-            //Cv2.ImShow("img", src);
-            //Cv2.WaitKey();
+
             var descriptors = hog.Compute(src, new Size(1, 1), new Size(0, 0));
             for (var i = 0; i < descriptors.Length; i++)
             {
